@@ -106,8 +106,9 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
             transform_list.append(transforms.RandomCrop(opt.crop_size))
         else:
             transform_list.append(transforms.Lambda(lambda img: __crop(img, params['crop_pos'], opt.crop_size)))
-
-    if 'patch' in opt.preprocess:
+    if 'center_patch' in opt.preprocess:
+        transform_list.append(transforms.Lambda(lambda img: __center_patch(img, opt.crop_size, opt.center_patch_offset)))
+    elif 'patch' in opt.preprocess:
         transform_list.append(transforms.Lambda(lambda img: __patch(img, params['patch_index'], opt.crop_size)))
 
     if 'trim' in opt.preprocess:
@@ -213,6 +214,23 @@ def __patch(img, index, size):
     gridy = starty + iy * size
     return img.crop((gridx, gridy, gridx + size, gridy + size))
 
+def __center_patch(img, size, max_offset=50):
+    ow, oh = img.size
+    gridx = max(0, (ow - size) // 2)
+    gridy = max(0, (oh - size) // 2)
+
+    max_offset = int(max(0, max_offset))
+    x_min_shift = -gridx
+    x_max_shift = (ow - size) - gridx
+    y_min_shift = -gridy
+    y_max_shift = (oh - size) - gridy
+
+    dx = random.randint(max(-max_offset, x_min_shift), min(max_offset, x_max_shift))
+    dy = random.randint(max(-max_offset, y_min_shift), min(max_offset, y_max_shift))
+
+    gridx += dx
+    gridy += dy
+    return img.crop((gridx, gridy, gridx + size, gridy + size))
 
 def __flip(img, flip):
     if flip:
