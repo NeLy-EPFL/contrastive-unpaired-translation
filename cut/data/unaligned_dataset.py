@@ -62,7 +62,8 @@ class UnalignedDataset(BaseDataset):
         # For CUT/FastCUT mode, if in finetuning phase (learning rate is decaying),
         # do not perform resize-crop data augmentation of CycleGAN.
         is_finetuning = self.opt.isTrain and self.current_epoch > self.opt.n_epochs
-        modified_opt = util.copyconf(self.opt, load_size=self.opt.crop_size if is_finetuning else self.opt.load_size)
+        finetune_load_size = self.opt.finetune_load_size if self.opt.finetune_load_size is not None else self.opt.crop_size
+        modified_opt = util.copyconf(self.opt, load_size=finetune_load_size if is_finetuning else self.opt.load_size)
         transform = get_transform(modified_opt)
         A = transform(A_img)
         B = transform(B_img)

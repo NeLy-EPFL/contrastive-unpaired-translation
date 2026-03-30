@@ -41,5 +41,8 @@ class TrainOptions(BaseOptions):
         parser.add_argument('--lr_decay_iters', type=int, default=50, help='multiply by a gamma every lr_decay_iters iterations')
         parser.add_argument('--wandb_project', type=str, default=None, help='Weights & Biases project name for logging')
 
+        # training dataset parameters
+        parser.add_argument('--finetune_load_size', type=int, default=None, help='scale images to this size during finetuning')
+
         self.isTrain = True
         return parser
