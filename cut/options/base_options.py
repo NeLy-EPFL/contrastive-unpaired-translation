@@ -55,7 +55,7 @@ class BaseOptions():
         parser.add_argument('--crop_size', type=int, default=256, help='then crop to this size')
         parser.add_argument('--center_patch_offset', type=int, default=0, help='max random offset in pixels around the image center when using center_patch preprocess')
         parser.add_argument('--max_dataset_size', type=int, default=float("inf"), help='Maximum number of samples allowed per dataset. If the dataset directory contains more than max_dataset_size, only a subset is loaded.')
-        parser.add_argument('--preprocess', type=str, default='resize_and_crop', help='scaling and cropping of images at load time [resize_and_crop | crop | scale_width | scale_width_and_crop | patch | center_patch | none]')
+        parser.add_argument('--preprocess', type=str, default='resize_and_crop', help='scaling and cropping of images at load time [resize_and_crop | crop | scale_width | scale_width_and_crop | patch | center_patch | center_patch_batch | none]')
         parser.add_argument('--no_flip', action='store_true', help='if specified, do not flip the images for data augmentation')
         parser.add_argument('--display_winsize', type=int, default=256, help='display window size for both tensorboard and HTML')
         parser.add_argument('--random_scale_max', type=float, default=3.0,

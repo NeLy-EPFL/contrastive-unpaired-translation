@@ -106,7 +106,10 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
             transform_list.append(transforms.RandomCrop(opt.crop_size))
         else:
             transform_list.append(transforms.Lambda(lambda img: __crop(img, params['crop_pos'], opt.crop_size)))
-    if 'center_patch' in opt.preprocess:
+    if 'center_patch_batch' in opt.preprocess:
+        # batch-level center patch is applied in dataloader collate_fn
+        pass
+    elif 'center_patch' in opt.preprocess:
         transform_list.append(transforms.Lambda(lambda img: __center_patch(img, opt.crop_size, opt.center_patch_offset)))
     elif 'patch' in opt.preprocess:
         transform_list.append(transforms.Lambda(lambda img: __patch(img, params['patch_index'], opt.crop_size)))
