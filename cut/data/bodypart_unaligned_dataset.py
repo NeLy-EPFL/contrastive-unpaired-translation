@@ -56,8 +56,27 @@ class BodypartUnalignedDataset(UnalignedDataset):
             )
         self.segment_col = self._index_A['segment_to_col'][self.segment_name]
 
-        self._geometry_A = self._build_geometry_cache(self.A_paths, self._index_A, domain='A')
-        self._geometry_B = self._build_geometry_cache(self.B_paths, self._index_B, domain='B')
+        self._geometry_A, self.A_paths, removed_A = self._build_geometry_cache(
+            self.A_paths,
+            self._index_A,
+            domain='A',
+        )
+        self._geometry_B, self.B_paths, removed_B = self._build_geometry_cache(
+            self.B_paths,
+            self._index_B,
+            domain='B',
+        )
+
+        self.A_size = len(self.A_paths)
+        self.B_size = len(self.B_paths)
+
+        removed_total = removed_A + removed_B
+        if removed_total > 0:
+            print(
+                f'[BodypartUnalignedDataset] Removed oversized samples: '
+                f'A={removed_A}, B={removed_B}, total={removed_total} '
+                f'(load_size={self.load_size}, body_part={self.segment_name})'
+            )
 
     def __getitem__(self, index):
         A_path = self.A_paths[index % self.A_size]
@@ -149,6 +168,8 @@ class BodypartUnalignedDataset(UnalignedDataset):
 
     def _build_geometry_cache(self, image_paths, index_data, domain):
         cache = {}
+        kept_paths = []
+        removed_count = 0
         path_to_row = index_data['path_to_row']
         xy = index_data['xy']
 
@@ -173,9 +194,8 @@ class BodypartUnalignedDataset(UnalignedDataset):
             if not math.isfinite(seg_size_px) or seg_size_px <= 0.0:
                 raise ValueError(f'Invalid segment length {seg_size_px} for {img_path} ({domain})')
             if seg_size_px > self.load_size:
-                raise ValueError(
-                    f'Segment length {seg_size_px:.3f} exceeds load_size {self.load_size} for {img_path} ({domain})'
-                )
+                removed_count += 1
+                continue
 
             margin_px = (self.load_size - seg_size_px) / 2.0
             center_x = float((prox[0] + dist[0]) / 2.0)
@@ -197,10 +217,11 @@ class BodypartUnalignedDataset(UnalignedDataset):
                 'seg_size_px': seg_size_px,
                 'margin_px': margin_px,
             }
+            kept_paths.append(img_path)
 
         if len(cache) == 0:
             raise ValueError(f'No valid geometry entries found for domain {domain}')
-        return cache
+        return cache, kept_paths, removed_count
 
     def _extract_aligned_roi(self, image, geometry):
         rotated = image.rotate(
