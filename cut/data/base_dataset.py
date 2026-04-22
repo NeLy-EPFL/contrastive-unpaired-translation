@@ -109,6 +109,8 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
     if 'center_patch_batch' in opt.preprocess:
         # batch-level center patch is applied in dataloader collate_fn
         pass
+    elif 'random_center_patch' in opt.preprocess:
+        transform_list.append(transforms.Lambda(lambda img: __random_center_patch(img, opt.crop_size, opt.center_patch_offset, method)))
     elif 'center_patch' in opt.preprocess:
         transform_list.append(transforms.Lambda(lambda img: __center_patch(img, opt.crop_size, opt.center_patch_offset)))
     elif 'patch' in opt.preprocess:
@@ -234,6 +236,13 @@ def __center_patch(img, size, max_offset=50):
     gridx += dx
     gridy += dy
     return img.crop((gridx, gridy, gridx + size, gridy + size))
+
+def __random_center_patch(img, size, max_offset=50, method=Image.BICUBIC):
+    if random.random() < 0.5:
+        return __center_patch(img, size, max_offset)
+    else:
+        # just resize
+        return transforms.Resize((size, size), method)(img)
 
 def __flip(img, flip):
     if flip:
