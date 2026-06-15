@@ -110,9 +110,11 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
         # batch-level center patch is applied in dataloader collate_fn
         pass
     elif 'random_center_patch' in opt.preprocess:
-        transform_list.append(transforms.Lambda(lambda img: __random_center_patch(img, opt.crop_size, opt.center_patch_offset, method)))
+        distribution = getattr(opt, 'center_patch_distribution', 'uniform')
+        transform_list.append(transforms.Lambda(lambda img: __random_center_patch(img, opt.crop_size, opt.center_patch_offset, method, distribution=distribution)))
     elif 'center_patch' in opt.preprocess:
-        transform_list.append(transforms.Lambda(lambda img: __center_patch(img, opt.crop_size, opt.center_patch_offset)))
+        distribution = getattr(opt, 'center_patch_distribution', 'uniform')
+        transform_list.append(transforms.Lambda(lambda img: __center_patch(img, opt.crop_size, opt.center_patch_offset, distribution=distribution)))
     elif 'patch' in opt.preprocess:
         transform_list.append(transforms.Lambda(lambda img: __patch(img, params['patch_index'], opt.crop_size)))
 
@@ -219,27 +221,43 @@ def __patch(img, index, size):
     gridy = starty + iy * size
     return img.crop((gridx, gridy, gridx + size, gridy + size))
 
-def __center_patch(img, size, max_offset=50):
+def __center_patch(img, size, max_offset=50, distribution='uniform'):
+    """Crop a `size`x`size` patch around the image center with a random offset.
+
+    distribution='uniform'  -- dx, dy ~ Uniform[-max_offset, max_offset]
+    distribution='gaussian' -- dx, dy ~ Normal(0, sigma=max_offset), clipped
+                               to the image boundaries.
+    """
     ow, oh = img.size
     gridx = max(0, (ow - size) // 2)
     gridy = max(0, (oh - size) // 2)
 
-    max_offset = int(max(0, max_offset))
     x_min_shift = -gridx
     x_max_shift = (ow - size) - gridx
     y_min_shift = -gridy
     y_max_shift = (oh - size) - gridy
 
-    dx = random.randint(max(-max_offset, x_min_shift), min(max_offset, x_max_shift))
-    dy = random.randint(max(-max_offset, y_min_shift), min(max_offset, y_max_shift))
+    if distribution == 'gaussian':
+        sigma = max(0.0, float(max_offset))
+        if sigma > 0:
+            dx = int(round(random.gauss(0.0, sigma)))
+            dy = int(round(random.gauss(0.0, sigma)))
+        else:
+            dx, dy = 0, 0
+        dx = max(x_min_shift, min(x_max_shift, dx))
+        dy = max(y_min_shift, min(y_max_shift, dy))
+    else:
+        max_offset = int(max(0, max_offset))
+        dx = random.randint(max(-max_offset, x_min_shift), min(max_offset, x_max_shift))
+        dy = random.randint(max(-max_offset, y_min_shift), min(max_offset, y_max_shift))
 
     gridx += dx
     gridy += dy
     return img.crop((gridx, gridy, gridx + size, gridy + size))
 
-def __random_center_patch(img, size, max_offset=50, method=Image.BICUBIC):
+def __random_center_patch(img, size, max_offset=50, method=Image.BICUBIC, distribution='uniform'):
     if random.random() < 0.5:
-        return __center_patch(img, size, max_offset)
+        return __center_patch(img, size, max_offset, distribution=distribution)
     else:
         # just resize
         return transforms.Resize((size, size), method)(img)

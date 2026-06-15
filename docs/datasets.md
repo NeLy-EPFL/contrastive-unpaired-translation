@@ -43,3 +43,41 @@ python datasets/combine_A_and_B.py --fold_A /path/to/data/A --fold_B /path/to/da
 ```
 
 This will combine each pair of images (A,B) into a single image file, ready for training.
+
+### Body-Part Aligned Unpaired Dataset
+For low-resolution domain translation where you want one model per body part, use `--dataset_mode bodypart_unaligned`.
+
+Expected folder structure under `--dataroot`:
+```
+dataroot/
+  trainA/
+  trainB/
+  testA/
+  testB/
+  valA/            # optional
+  valB/            # optional
+  annotations/
+    trainA_bodyparts.npz
+    trainB_bodyparts.npz
+    testA_bodyparts.npz
+    testB_bodyparts.npz
+    valA_bodyparts.npz   # optional
+    valB_bodyparts.npz   # optional
+```
+
+Each NPZ file must contain:
+- `rel_paths`: relative image paths
+- `xy`: shape `[N, K, 2, 2]` with proximal/distal endpoint coordinates
+- `vis`: shape `[N, K, 2]` visibility mask for each endpoint
+- `image_hw`: shape `[N, 2]` source image dimensions
+- `segment_names`: ordered list of K segment names
+
+Training example:
+```bash
+python train.py \
+  --dataroot /path/to/dataroot \
+  --dataset_mode bodypart_unaligned \
+  --body_part lf_tibia \
+  --name cut_lf_tibia \
+  --model cut
+```
