@@ -3,6 +3,8 @@ from cut.data.base_dataset import BaseDataset, get_transform
 from cut.data.image_folder import make_dataset
 from PIL import Image
 import random
+import torch
+import torchvision.transforms.functional as TF
 from cut.util import util
 
 
@@ -37,6 +39,14 @@ class UnalignedDataset(BaseDataset):
         self.A_size = len(self.A_paths)  # get the size of dataset A
         self.B_size = len(self.B_paths)  # get the size of dataset B
 
+        # Optional silhouette masks for domain A, used by the edge loss in
+        # cut_model.py when --lambda_edge > 0. Same basename as the image,
+        # extension is .png to preserve binary values losslessly.
+        self.dir_A_mask = self.dir_A + "_mask"
+        self.has_mask_A = os.path.isdir(self.dir_A_mask)
+        if self.has_mask_A:
+            print(f"Found domain-A mask directory: {self.dir_A_mask}")
+
     def __getitem__(self, index):
         """Return a data point and its metadata information.
 
@@ -65,10 +75,32 @@ class UnalignedDataset(BaseDataset):
         finetune_load_size = self.opt.finetune_load_size if self.opt.finetune_load_size is not None else self.opt.crop_size
         modified_opt = util.copyconf(self.opt, load_size=finetune_load_size if is_finetuning else self.opt.load_size)
         transform = get_transform(modified_opt)
+
+        # Snapshot RNG state so the optional A mask receives the exact same
+        # random spatial transforms (crop, flip) as A.
+        py_state = random.getstate()
+        torch_state = torch.get_rng_state()
         A = transform(A_img)
         B = transform(B_img)
 
-        return {'A': A, 'B': B, 'A_paths': A_path, 'B_paths': B_path}
+        result = {'A': A, 'B': B, 'A_paths': A_path, 'B_paths': B_path}
+
+        if self.has_mask_A:
+            mask_path = os.path.join(
+                self.dir_A_mask, os.path.splitext(os.path.basename(A_path))[0] + ".png"
+            )
+            A_mask_pil = Image.open(mask_path).convert("L")
+            random.setstate(py_state)
+            torch.set_rng_state(torch_state)
+            # Same spatial transforms, but NEAREST interpolation (preserve binary
+            # boundary) and no Normalize (mask should stay in [0, 1]).
+            mask_transform = get_transform(modified_opt, method=Image.NEAREST, convert=False)
+            A_mask_pil = mask_transform(A_mask_pil)
+            A_mask = TF.to_tensor(A_mask_pil)
+            A_mask = (A_mask > 0.5).float()
+            result["A_mask"] = A_mask
+
+        return result
 
     def __len__(self):
         """Return the total number of images in the dataset.

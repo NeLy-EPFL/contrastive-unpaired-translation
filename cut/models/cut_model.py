@@ -1,9 +1,30 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 from cut.models.base_model import BaseModel
 from cut.models import networks
 from cut.models.patchnce import PatchNCELoss
 from cut.util import util
+
+
+def _sobel_magnitude(image):
+    """Sobel gradient magnitude on a (B, C, H, W) tensor, returned as (B, 1, H, W).
+
+    Operates on the channel mean (treating any input as grayscale for edge
+    detection) so the cost is independent of input channel count.
+    """
+    gray = image.mean(dim=1, keepdim=True)
+    kx = torch.tensor(
+        [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]],
+        dtype=image.dtype, device=image.device,
+    ).view(1, 1, 3, 3)
+    ky = torch.tensor(
+        [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]],
+        dtype=image.dtype, device=image.device,
+    ).view(1, 1, 3, 3)
+    gx = F.conv2d(gray, kx, padding=1)
+    gy = F.conv2d(gray, ky, padding=1)
+    return torch.sqrt(gx * gx + gy * gy + 1e-8)
 
 
 class CUTModel(BaseModel):
@@ -65,6 +86,16 @@ class CUTModel(BaseModel):
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
             self.visual_names += ['idt_B']
+
+        if getattr(opt, 'lambda_edge', 0.0) > 0.0:
+            # The mask-aware edge loss assumes A is the structurally-known
+            # domain. Using --direction BtoA would feed B-domain images into G
+            # while still referencing the A-side mask -- ill-defined.
+            assert opt.direction == 'AtoB', (
+                "--lambda_edge > 0 requires --direction AtoB "
+                "(domain A must be the source with masks)."
+            )
+            self.loss_names += ['edge']
 
         if self.isTrain:
             self.model_names = ['G', 'F', 'D']
@@ -142,6 +173,13 @@ class CUTModel(BaseModel):
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
+        # Foreground silhouette mask for real_A (1 = fly, 0 = background).
+        # Only present when --lambda_edge > 0 and a <dataroot>/<phase>A_mask/
+        # directory exists; otherwise the edge loss is disabled.
+        if 'A_mask' in input:
+            self.real_A_mask = input['A_mask'].to(self.device)
+        else:
+            self.real_A_mask = None
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -193,6 +231,18 @@ class CUTModel(BaseModel):
             loss_NCE_both = self.loss_NCE
 
         self.loss_G = self.loss_G_GAN + loss_NCE_both
+
+        # Mask-aware background edge loss: penalize generator-output gradients
+        # in regions where the source mask says "background". Foreground (the
+        # fly body, including legs) is unconstrained, so internal texture
+        # transfer remains free. Asymmetric on purpose -- we discourage
+        # hallucinated background structures without enforcing edges anywhere.
+        if getattr(self.opt, 'lambda_edge', 0.0) > 0.0 and self.real_A_mask is not None:
+            grad_fake_B = _sobel_magnitude(self.fake_B)
+            background_weight = 1.0 - self.real_A_mask
+            self.loss_edge = self.opt.lambda_edge * (grad_fake_B * background_weight).mean()
+            self.loss_G = self.loss_G + self.loss_edge
+
         return self.loss_G
 
     def calculate_NCE_loss(self, src, tgt):
