@@ -28,8 +28,8 @@ packages = [{include = "cut"}]
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
 numpy = ">=2.0,<3"
-torch = "==2.9.*"  # 2.9 required by torchvision
-torchvision = "==0.24.*"  # specific to torch 2.9
+torch = "==2.12.*"
+torchvision = "==0.27.*"
 dominate = ">=2.4.0,<3"
 tensorboard = ">=2.0.0,<3"
 packaging = ">=25,<26"
