@@ -85,13 +85,10 @@ class CUTModel(BaseModel):
 
         # Domain A may carry geometric-prior channels appended after the image
         # slot (input_nc > output_nc). When it does, every netG input must be
-        # channel-matched to input_nc, and real_A is visualized by its image
-        # slot only. When input_nc == output_nc this flag is False and the model
-        # behaves exactly like stock CUT.
+        # channel-matched to input_nc, and real_A is shown by its image slot
+        # only (see get_current_visuals). When input_nc == output_nc this flag
+        # is False and the model behaves exactly like stock CUT.
         self.has_prior_channels = self.opt.input_nc != self.opt.output_nc
-        if self.has_prior_channels:
-            self.visual_names = ['real_A_vis' if name == 'real_A' else name
-                                 for name in self.visual_names]
 
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
@@ -191,6 +188,19 @@ class CUTModel(BaseModel):
         else:
             self.real_A_mask = None
 
+    def get_current_visuals(self):
+        """Return visuals for display; show real_A by its image slot only.
+
+        In multiprior mode real_A carries geometric-prior channels after the
+        image slot, which tensor2im/montages cannot render. Slice it to the
+        first output_nc channels so the simulated reference image still shows
+        (under the usual "real_A" key, which the visualizer montage expects).
+        """
+        visuals = super().get_current_visuals()
+        if self.has_prior_channels and "real_A" in visuals:
+            visuals["real_A"] = visuals["real_A"][:, : self.opt.output_nc]
+        return visuals
+
     def _pad_priors_with_zeros(self, image):
         """Append zero prior channels so a 3-channel image reaches input_nc.
 
@@ -208,7 +218,6 @@ class CUTModel(BaseModel):
         # domain B (zero priors) so both can pass through the shared generator.
         if self.has_prior_channels:
             self.real_A_priors = self.real_A[:, self.opt.output_nc:]
-            self.real_A_vis = self.real_A[:, :self.opt.output_nc]
             real_B_in = self._pad_priors_with_zeros(self.real_B)
         else:
             self.real_A_priors = None
