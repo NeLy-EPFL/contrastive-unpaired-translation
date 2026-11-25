@@ -83,6 +83,16 @@ class CUTModel(BaseModel):
         self.visual_names = ['real_A', 'fake_B', 'real_B']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
 
+        # Domain A may carry geometric-prior channels appended after the image
+        # slot (input_nc > output_nc). When it does, every netG input must be
+        # channel-matched to input_nc, and real_A is visualized by its image
+        # slot only. When input_nc == output_nc this flag is False and the model
+        # behaves exactly like stock CUT.
+        self.has_prior_channels = self.opt.input_nc != self.opt.output_nc
+        if self.has_prior_channels:
+            self.visual_names = ['real_A_vis' if name == 'real_A' else name
+                                 for name in self.visual_names]
+
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
             self.visual_names += ['idt_B']
@@ -181,9 +191,30 @@ class CUTModel(BaseModel):
         else:
             self.real_A_mask = None
 
+    def _pad_priors_with_zeros(self, image):
+        """Append zero prior channels so a 3-channel image reaches input_nc.
+
+        Used for domain B (no synthetic geometry) and for the identity branch,
+        whose generated images carry no priors. No-op callers guard on
+        self.has_prior_channels, so this is only reached when padding is needed.
+        """
+        n_prior = self.opt.input_nc - self.opt.output_nc
+        zeros = image.new_zeros(image.size(0), n_prior, image.size(2), image.size(3))
+        return torch.cat([image, zeros], dim=1)
+
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        self.real = torch.cat((self.real_A, self.real_B), dim=0) if self.opt.nce_idt and self.opt.isTrain else self.real_A
+        # Split domain A's prior channels from its image slot, and channel-match
+        # domain B (zero priors) so both can pass through the shared generator.
+        if self.has_prior_channels:
+            self.real_A_priors = self.real_A[:, self.opt.output_nc:]
+            self.real_A_vis = self.real_A[:, :self.opt.output_nc]
+            real_B_in = self._pad_priors_with_zeros(self.real_B)
+        else:
+            self.real_A_priors = None
+            real_B_in = self.real_B
+
+        self.real = torch.cat((self.real_A, real_B_in), dim=0) if self.opt.nce_idt and self.opt.isTrain else self.real_A
         if self.opt.flip_equivariance:
             self.flipped_for_equivariance = self.opt.isTrain and (np.random.random() < 0.5)
             if self.flipped_for_equivariance:
@@ -220,12 +251,28 @@ class CUTModel(BaseModel):
             self.loss_G_GAN = 0.0
 
         if self.opt.lambda_NCE > 0.0:
-            self.loss_NCE = self.calculate_NCE_loss(self.real_A, self.fake_B)
+            # fake_B is the translation of real_A's frame, so it reuses real_A's
+            # known priors; the NCE pair then differs only in the image channels.
+            if self.real_A_priors is not None:
+                priors_for_fake = self.real_A_priors
+                if self.opt.flip_equivariance and self.flipped_for_equivariance:
+                    priors_for_fake = torch.flip(priors_for_fake, [3])
+                fake_B_in = torch.cat([self.fake_B, priors_for_fake], dim=1)
+            else:
+                fake_B_in = self.fake_B
+            self.loss_NCE = self.calculate_NCE_loss(self.real_A, fake_B_in)
         else:
             self.loss_NCE, self.loss_NCE_bd = 0.0, 0.0
 
         if self.opt.nce_idt and self.opt.lambda_NCE > 0.0:
-            self.loss_NCE_Y = self.calculate_NCE_loss(self.real_B, self.idt_B)
+            # Identity branch: real_B and idt_B both carry zero priors, so their
+            # prior channels cancel and NCE_Y contrasts only the image content.
+            if self.has_prior_channels:
+                real_B_in = self._pad_priors_with_zeros(self.real_B)
+                idt_B_in = self._pad_priors_with_zeros(self.idt_B)
+            else:
+                real_B_in, idt_B_in = self.real_B, self.idt_B
+            self.loss_NCE_Y = self.calculate_NCE_loss(real_B_in, idt_B_in)
             loss_NCE_both = (self.loss_NCE + self.loss_NCE_Y) * 0.5
         else:
             loss_NCE_both = self.loss_NCE
