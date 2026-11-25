@@ -818,8 +818,10 @@ class StyleGAN2Encoder(nn.Module):
         blur_kernel = [1, 3, 3, 1]
 
         cur_res = 2 ** int((np.rint(np.log2(min(opt.load_size, opt.crop_size)))))
+        # Use input_nc (not a hardcoded 3) so domain A can carry extra channels
+        # beyond RGB, e.g. the geometric-prior stack in multiprior_unaligned.
         convs = [nn.Identity(),
-                 ConvLayer(3, channels[cur_res], 1)]
+                 ConvLayer(input_nc, channels[cur_res], 1)]
 
         num_downsampling = self.opt.stylegan2_G_num_downsampling
         for i in range(num_downsampling):
