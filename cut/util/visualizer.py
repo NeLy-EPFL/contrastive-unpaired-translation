@@ -8,6 +8,34 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 
 
+# Human-readable labels for the panels in the TensorBoard 'results' montage.
+RESULTS_PANEL_LABELS = {
+    'real_A': 'sim (A)',          # simulated input (grayscale image slot)
+    'fake_B': 'synthetic G(A)',   # translation of the sim input
+    'real_B': 'real (B)',         # a real recorded image (unpaired)
+    'idt_B': 'identity G(B)',     # generator applied to a real image (should ~= real B)
+}
+
+
+def _draw_panel_label(image_numpy, text):
+    """Draw a small text label (top-left) on a HxWx3 uint8 image.
+
+    Uses a black outline + white fill so it stays legible on any background.
+    If OpenCV is unavailable the image is returned unchanged.
+    """
+    try:
+        import cv2
+        img = np.ascontiguousarray(image_numpy)
+        if img.ndim != 3 or img.shape[2] != 3:
+            return image_numpy
+        font, scale, org = cv2.FONT_HERSHEY_SIMPLEX, 0.5, (6, 18)
+        cv2.putText(img, text, org, font, scale, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, text, org, font, scale, (255, 255, 255), 1, cv2.LINE_AA)
+        return img
+    except Exception:
+        return image_numpy
+
+
 def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
     """Save images to the disk.
 
@@ -103,12 +131,14 @@ class Visualizer():
             epoch (int) - - the current epoch
             save_result (bool) - - if save the current results to an HTML file
         """
-        # TensorBoard: concatenate images if all are present
+        # TensorBoard: concatenate the standard panels, each with a label.
         concat_keys = ['real_A', 'fake_B', 'real_B', 'idt_B']
         images_to_concat = []
         for k in concat_keys:
             if k in visuals:
-                image_numpy = util.tensor2im(visuals[k])
+                image_numpy = _draw_panel_label(
+                    util.tensor2im(visuals[k]), RESULTS_PANEL_LABELS.get(k, k)
+                )
                 images_to_concat.append(image_numpy)
         if self.writer is not None and len(images_to_concat) > 0:
             # Concatenate horizontally
